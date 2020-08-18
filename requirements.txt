@@ -1,6 +1,6 @@
 pandas
 numpy
-!pip install sklearn
+sklearn
 matplotlib
 seaborn
 xlrd
