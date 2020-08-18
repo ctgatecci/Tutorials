@@ -1,0 +1,125 @@
+---
+title: "Standardized mean difference (SSMD) of propensity scores"
+output: html_document
+---
+
+## Propensity-score-based method 
+
+In this section, we will introduce a propensity-score-based method to assess the generalizability of clinical study. We propose the use of propensity-score-based metrics to quantify the similarity of the participants in a designed clinical trial and a target population. 
+
+In Rubin Causal model, propensity score is defined as $e(X)=Pr(Z=1|X)$, where $Z=z,z\in{0,1}$ is an indicator variable denoting subject's participation of trial, $X = (X_1,X_2,...,X_n)$ is a vector of covariates. 
+
+### Propensity-score difference
+
+In [Elizabeth A. Stuart, 2010], the author introduces a propensity-score-based metric as:
+
+$$
+\Delta e(X) = \frac{1}{\sum I(Z_i=1)}\sum I(Z_i=1) e(X_i)-\frac{1}{\sum I(Z_i=0)}\sum I(Z_i=0)(1- e(X_i))
+$$
+
+However, we can find that this method has obvious shortcoming. 
+Here we assume there are two trials. 
+Two trials' propensity score distributions are:
+
+```{r }
+mu1 <- 0.4
+mu2 <- 0.5
+sigma1 <- 0.05
+sigma2 <- 0.01
+
+x <- seq(0,1,0.01)
+f1 <- 1/sqrt(2*pi*sigma1^2)*exp(-(x-mu1)^2/(2*sigma1^2))
+f2 <- 1/sqrt(2*pi*sigma1^2)*exp(-(x-mu2)^2/(2*sigma1^2))
+f3 <- 1/sqrt(2*pi*sigma2^2)*exp(-(x-mu1)^2/(2*sigma2^2))
+f4 <- 1/sqrt(2*pi*sigma2^2)*exp(-(x-mu2)^2/(2*sigma2^2))
+
+matplot(x, cbind(f1,f2), type='l', main='Trail 1', xlab='Propensity score', ylab='Density', pch=1)
+matplot(x, cbind(f3,f4), type='l', main='Trial 2', xlab='Propensity score', ylab='Density', pch=2)
+```
+
+If $Y=1$ means patients are eligible for the trial design while $Y=0$ means real world population. We find although the propensity score's difference is same, which is $0.5-0.4=0.1$
+here, variances of score distribution is different. We find the overlap of trial 2' two distribution is larger than trial 1's. We may wonder only using propensity score's difference to describe the generalizability of trial is not enough. 
+
+#### Strictly standardized mean difference (SSMD) of propensity score 
+In [Ryoko Susukida,2016], the author uses SSMD to estimate the generalizability of trial. The definition of SSMD is 
+$$\frac{\Delta e(X)}{\text{pooled standard deviation}}$$
+
+And we find SSMD of trial 1 is $\frac{0.5-0.4}{\sqrt{0.01}}=1$, while SSMD of trial 2 is $\frac{0.5-0.4}{\sqrt{0.05}}=0.447$. According to [Ryoko Susukida,2016], propensity score mean values that differ by more than 0.25 standard deviations (standardized $\Delta e(X)$) indicate significant differences between the samples. The significant differences of trial 1 is higher than trial 2, which verify our former assumption.
+
+### Run propensity-score-based method on R
+
+We use a real world data to exhibit this propensity-score-based method
+
+#### Introduction to Data Sets:
+
+load data:
+```{r}
+library(dplyr)
+T2D <- read.csv("C:/Users/arsla/Desktop/ctGate/Tutorial/NHANES_T2D_tutorial_10242019.csv",header=T)
+T2D = mutate(T2D, GROUP = ifelse(T2D$BMXBMI<40 & T2D$LBXGH>7.5 & T2D$LBXGH<10 & T2D$RIDAGEYR>18 & T2D$RIDAGEYR<90, 1, 0))
+head(T2D)
+```
+
+use logistics regression model to estimate propensity score:
+
+```{r}
+m_ps <- glm(GROUP ~ RIDAGEYR + LBXGH + BMXBMI, data = T2D, family = binomial())   ## construct the model
+summary(m_ps)
+
+prs_df <- data.frame(pr_score = predict(m_ps, type = "response"),
+                     GROUP = m_ps$model$GROUP)   ## estimate the propensity score 
+head(prs_df)  ## show the head line of propensity score
+```
+
+Now we want to compare the Strictly standardized mean difference (SSMD) of propensity scores of two groups. Here we will use the pooled standard deviation.
+
+Definition of pooled standard deviations:
+$$\sigma=\sqrt{\frac{s1^2*(n_1-1)+s2^2*(n_2-1)}{(n_1+n_2-2)}}$$
+
+```{r}
+c_0 <- prs_df %>% 
+  filter(GROUP=="0") %>%
+  select(pr_score)
+pr_score0 <- c_0$pr_score
+c_1 <- prs_df %>% 
+  filter(GROUP=="1") %>%
+  select(pr_score)
+pr_score1 <- c_1$pr_score
+
+n0 = length(pr_score0)
+n1 = length(pr_score1)
+pooled_sd <- sqrt((sd(pr_score1)^2*(n1-1)+sd(pr_score0)^2*(n0-1))/(n0+n1-2))
+
+prs_df %>% 
+  mutate(pooled_sd) %>%
+  group_by(GROUP) %>%
+  summarise(prs_mean = mean(pr_score),
+            pooled_standard_deviations = mean(pooled_sd),
+            standardized_prs_mean = mean(pr_score/pooled_sd),
+            n = n())
+```
+
+```{r}
+prs_dis <- c(mean(pr_score1)-mean(pr_score0),pooled_sd,(mean(pr_score1)-mean(pr_score0))/pooled_sd)
+names(prs_dis) <- c("prs_difference","pooled_standard_deviations","standardized_prs_difference")
+data.frame(prs_dis)
+```
+
+Compare propensity distributions for group with
+
+```{r}
+library(sm)
+
+# create value labels 
+GROUP.f <- factor(prs_df$GROUP, levels= c(0,1),
+                     labels = c("GROUP=0","GROUP=1")) 
+
+# plot densities 
+
+sm.density.compare(prs_df$pr_score, prs_df$GROUP, xlab="propensity score")
+title(main="Propensity_score Distribution by group")
+
+# add legend via mouse click
+colfill<-c(2:(2+length(levels(GROUP.f)))) 
+legend("topright",legend = levels(GROUP.f), fill=colfill)
+```

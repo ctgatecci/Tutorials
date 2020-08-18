@@ -1,0 +1,426 @@
+---
+title: "Comparing populations in clinical studies"
+
+output:
+  html_document: default
+  pdf_document: default
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+We are using the 2003-2012 Type 2 diabetes National Health and Nutrition Examination Survey data as an example to demonstrate the methods involved in the clinical trial generalizability assessment. The total sample size of Type 2 diabetes patients is N = 2695 and we defined it as the General Population. 
+
+First, we applied three clinical trial inclusion criteria, based on the "Efficacy Evaluation of Different Medication Combination in Type 2 Diabetes Treatment Study"" (ClinicalTrials.gov Identifier: NCT01076842), to the dataset and categorized the patients as two groups: trial participants and non-participants. 
+
+- Age is from 18 to 90 years old (variable name: RIDAGEYR)
+- BMI is less than 40 kg/m2 (variable name: BMXBMI)
+- Hemoglobin A1C is between 7.5% and 10% (variable name: LBXGH)
+
+We will use the three groups: general population (GenPop), trial participants (Trial), and non-participants (NonPart) in the further analysis. 
+
+
+## 1. Read the Dataset
+
+```{r}
+T2D = read.csv("C:/Users/arsla/Desktop/ctGate/Tutorial/NHANES_T2D_tutorial_10242019.csv", header = TRUE)
+head(T2D)
+```
+
+## 2. Data Cleaning
+
+To exam if there is missing values in the dataset, we can use "sum(is.na)" to calculate the number NAs in the dataset, then use "na.omit" to delete any rows that contain NA values to use a complete case for analysis. 
+
+```{r clean}
+sum(is.na(T2D))
+# There is no missing values in this dataset.
+```
+
+## 3. Create trial participants and non-participants subgroups
+
+Create the trial participants and non-participants groups based on the three inclusion criteria mentioned above. 
+
+```{r subgroups}
+# install.packages('dplyr')
+library(dplyr)
+T2D = mutate(T2D, GROUP = ifelse(T2D$BMXBMI<40 & T2D$LBXGH>7.5 & T2D$LBXGH<10 & T2D$RIDAGEYR>18 & T2D$RIDAGEYR<90, "Trial", "NonPart"))
+table(T2D$GROUP)
+# 545 type 2 diabetes patients met the inclusion criteria and are grouped as Trial Participants.
+# The rest 2150 patients are grouped as Non-participants.
+```
+
+
+## 4. Normality Check
+
+Before deciding on which clinical trial generalizabilility assessment method that we should preform, it is important to check the normality of a variable's distribution. In R, the histogram plot will give an indication of the shape of the distribution. A density curve smooths out the histogram and can be added to the graph.
+
+```{r hist}
+hist(T2D$BMXBMI,probability=T,ylim=c(0,0.07))
+lines(density(T2D$BMXBMI),col=2)
+# The histogram plot shows the Body Mass Index data is skewed right, which is not normally distributed.
+```
+
+Additionally, the normal Q-Q plot is an alternative graphical method of assessing normality to the histogram and is easier to use when there are small sample sizes. 
+
+```{r qqplot}
+qqnorm(T2D$BMXBMI)
+qqline(T2D$BMXBMI,col=2)
+# The Q-Q plot shows the Body Mass Index data is not normally distributed. 
+```
+
+However, sometimes it is hard to tell if the data is normally distributed or not. We can conduct a statistical test to get a more confirmative conclusion of the normality, Shapiro-Wilk Normality Test can be used (if sample size is between 3 and 5000). If p-value is greater than 0.05, it indicates the data is normally distributed at the 95% significant level. Otherwise, the data is skewed. 
+
+Anderson-Darling normality test can be used with more than 5000 sample size. 
+
+```{r normalitytest}
+shapiro.test(T2D$BMXBMI)
+# p-value is much less than 0.05.
+# The null hypothesis is rejected, meaning the data is not normally distributed. 
+
+# install.packages('nortest')
+library(nortest)
+
+ad.test(T2D$BMXBMI)
+# Anderson-Darling normality test also shows p-value less than 0.05.
+```
+
+## 5. Compared Baseline Characteristics
+
+Baseline information includes demographics (gender, age, ethnicity, etc.) and clinical characteristics (Body Mass Index, Hemoglobin A1C, etc.)
+
+
+**Categorical Variables Comparisons** 
+
+- Chi-square Test
+
+Chi-Square Test, also written as χ2 test, is used to test the associations of two categorical variables having only two subcategories, which means the output table should be 2-by-2. 
+
+For example, we want to know if gender (male and female) affect the clinical trial enrollment. In other words, if male or female patients are more likely to be enrolled in the type 2 diabetes trial.
+
+```{r chi}
+T2D$RIAGENDR <- factor(T2D$RIAGENDR, levels = c(1,2), labels = c("Male", "Female")) 
+# Change the coded 1, 2 to labels 1=Male, 2=Female
+
+trial_gender = table(T2D$RIAGENDR, T2D$GROUP) # Create a 2x2 table
+trial_gender
+
+chisq.test(trial_gender)
+# p-value is less than 0.05, meaning there is a significant difference between male and female patients in regard to the clinical trial enrollment. 
+# Male are more likely to be enrolled in the type 2 diabetes trial
+```
+
+
+- Fisher's Exact Test
+
+Fisher’s Exact Test is used in the analysis of contingency tables. The test is used when the two categorical variables have more than two subcategories or relatively small sample sizes. Although in practice it is employed when sample sizes are small, it is valid for all sample sizes.
+
+For example, we want to know if race/ethnicity affect the clinical trial enrollment. In other words, if a particular ethnic group is more likely to be enrolled in the type 2 diabetes trial.
+
+```{r fisher}
+T2D$RIDRETH1 <- factor(T2D$RIDRETH1, levels = c(1,2,3,4,5), labels = c("Mexican American", "Other Hispanic", "Non-Hispanic White", "Non-Hispanic Black", "Other Race")) 
+# Change the coded to labels
+
+trial_race = table(T2D$RIDRETH1, T2D$GROUP) # Create a table for fisher's exact test
+trial_race
+
+fisher.test(trial_race, simulate.p.value=TRUE)
+# p-value is less than 0.05, meaning there is a significant association between ethinicity and the clinical trial enrollment. 
+# Non-Hispanic White and Black are less likely to be enrolled in the clinical trial compared to Hispanics and other race.
+```
+
+**Numerical Variables Comparisons**
+
+*A. Normally Distributed Data*
+
+Since the T2D dataset does not have a variable that is normally distributed, we randomly generated a new variable "SleepTime" for each patient that follows a normal distribution with mean = 6.8 hours per day and standard deviation = 1.6.
+
+```{r sleeptime}
+n = nrow(T2D) # Get the number of rows
+SLEEP = rnorm(n, mean = 6.8, sd = 1.6) # Randomly generate a normally distributed variable
+T2D$SLEEP = SLEEP # Add the new variabe into the T2D dataset
+head(T2D) # the modified T2D dataset - appending GROUP and SLEEP variables
+```
+
+- Student's t-test
+
+A t-test is most commonly applied when the test statistic would follow a normal distribution. It can be used, for example, to determine if the means of two sets of data are significantly different from each other.
+
+For example, we want to know if there is a difference between the clinical trial participants or not in regard to sleep time at 95% confidence level.
+
+```{r ttest}
+t.test(SLEEP ~ GROUP, data = T2D, conf.level = 0.95)
+# The p-value is greater than 0.05. It means sleep time does not affect the type 2 diabetes clinical trial enrollment.
+```
+
+- Z-test
+
+Z-test is based on the standard normal distribution. For each significance level, the Z-test has a single critical value (for example, 1.96 for 5% two tailed) which makes it more convenient than the Student's t-test which has separate critical values for each sample size. Therefore, many statistical tests can be conveniently performed as approximate Z-tests if the sample size is large or the population variance is known. If the population variance is unknown (and therefore has to be estimated from the sample itself) and the sample size is not large (n < 30), the Student's t-test may be more appropriate.
+
+For example, we have known that the mean of sleep time is 6.8 and the variance is 2.6 for the general population (the total sample N=2695). We want to compare the average sleep time of the clinical trial participant with the general population. 
+
+```{r Ztest}
+# Define the z.test function with standardized z-score
+# x = sample dataset
+# popmu = population mean
+# popvar = population variance
+
+z.test = function(x,popmu,popvar){
+  one.tail.p = NULL
+  z.score = round((mean(x) - popmu) / sqrt(popvar / length(x)), 3) # round to three decimal places
+  one.tail.p = round(pnorm(abs(z.score), lower.tail = FALSE), 3)
+  # Set up the output display
+  cat("z = ", z.score, "\n", 
+      "one-tailed probability =", one.tail.p, "\n", 
+      "two-tailed probability = ", 2*one.tail.p) # cat = concatenate and print 
+}
+
+# Get the mean of sleep time in the general population
+mean(T2D$SLEEP)
+
+# Get the variance of sleep time in the general population
+var(T2D$SLEEP)
+
+# Subset the sleep time of the trial participants
+trial_sleep = T2D[which(T2D$GROUP=='Trial'), 8]
+
+# Conduct the one-sample Z-test
+z.test(trial_sleep, mean(T2D$SLEEP), var(T2D$SLEEP))
+
+# p-value is greater than 0.05, which means the average sleep time of the clinical trial participants is not different from the mean of the general population.
+```
+
+- F-test
+
+Student's t-test is used to compare the means of two groups, while F-test is used to assess whether the variances of two groups (A and B) are equal. The R function var.test() can be used to compare.
+
+For example, we want to know if the variances of the clinical trial participants and non-participants, in regard to sleep time, are the same at 95% confidence level.
+
+```{r Ftest}
+var.test(SLEEP ~ GROUP, data = T2D)
+# The p-value is greater than 0.05. It means the variances of sleep time between the clinical trial participants and the non-participants have no difference.
+```
+
+- Analysis of Variance (ANOVA)
+
+Analysis of variance (ANOVA) is a collection of statistical models and their associated estimation procedures (such as the "variation" among and between groups) used to analyze the differences among group means in a sample. ANOVA provides a statistical test of whether two or more population means are equal.
+
+There are two functions we can use to conduct an ANOVA test, namely oneway.test() and aov().
+
+For example, we want to know if there are any differences in regard to slepping time among different ethnicity groups.
+
+```{r anova}
+oneway.test(SLEEP ~ RIDRETH1, data = T2D)
+# The p-value is greater than 0.05. It means there are no significant differences in sleep time among ethnicity groups.
+
+aovtest = aov(SLEEP ~ RIDRETH1, data = T2D)
+summary(aovtest)
+# Although the p-value is different than the one given in "oneway.test" method, the conclusion is not changed. There are no significant differences in regard to sleep time among ethnicity groups.
+```
+
+*B. Unnormally Distributed Data*
+
+- Wilcoxon Rank Sum test (AKA Mann-Whitney U test)
+
+Wilcoxon rank-sum test (also called the Mann–Whitney–Wilcoxon (MWW), The Mann–Whitney U test, or Wilcoxon–Mann–Whitney test) is a nonparametric test of the null hypothesis that it is equally likely that a randomly selected value from one sample will be less than or greater than a randomly selected value from a second sample.
+
+For example, we want to know if there is any significant difference between the age in the clinical trial participants and the non-participants.
+
+```{r whitney}
+wilcox.test(RIDAGEYR ~ GROUP, data = T2D) 
+# The p-value is greater than 0.05. It means there is no significant difference between the clinical trial participants and the non-participants in regard to age.
+```
+
+- Kruskal–Wallis test
+
+The Kruskal–Wallis test by ranks, Kruskal–Wallis H test (named after William Kruskal and W. Allen Wallis), or one-way ANOVA on ranks is a non-parametric method for testing whether samples originate from the same distribution. It is used for comparing two or more independent samples of equal or different sample sizes. It extends the Mann–Whitney U test, which is used for comparing only two groups. The parametric equivalent of the Kruskal–Wallis test is the one-way analysis of variance (ANOVA).
+
+For example, we want to know if the Hemoglobin A1C values in various ethnicity groups are different.
+
+```{r kruskal}
+kruskal.test(LBXGH ~ RIDRETH1, data = T2D) 
+# The p-value is much less than 0.05, meaning there are significant differences among the ethnicity groups in regard to the Hemoglobin A1C values.
+```
+
+
+*C. Statistical Models Building Methods*
+
+Besides comparing the baseline information (demographics and/or clinical characteristics), we also can further explore, for example, significant factors (i.e. age, race, gender, etc.) that may affect patients participation in clinical trials by building statistical models, such as Linear or Logistic Regression.
+
+- Logistic Regression (Outcome is binary)
+
+The logistic model (or logit model) is used to model the probability of a certain class or event existing such as pass/fail, win/lose, alive/dead or healthy/sick. In other words, the outcome of the model should be a binary variable. 
+
+In this example, we build a logistic regression model to exam what factors may affect the participation in a Type 2 diabetes trial. The potential five factors are gender, age, ethnicity, BMI, and Hemoglobin A1C.
+
+```{r logistic}
+# Create a dummy variable TRIAL for the model outcome - Trial participants = 1, Non-participants = 0
+# install.packages("psych")
+library(psych)
+T2D$TRIAL = dummy.code(T2D$GROUP, group = "Trial")
+
+# Check potential correlations using Scatterplot Matrix
+T2D$color = ifelse(T2D$TRIAL==1,1,2)
+pairs(~ TRIAL + RIAGENDR + RIDRETH1 + RIDAGEYR + LBXGH + BMXBMI, data = T2D, col=T2D$color) 
+
+# Build the logistic regression model
+logi_fit = glm(TRIAL ~ RIAGENDR + RIDRETH1 + RIDAGEYR + LBXGH + BMXBMI, data = T2D, family = binomial)
+summary(logi_fit) 
+# RIDAGEYR, BMI and Glycohemoglobin values show significant p-values. Thus, we need to remove gender and ethnicity and update the model.
+
+logi_fit2 = glm(TRIAL ~ RIDAGEYR + LBXGH + BMXBMI, data = T2D, family = binomial)
+summary(logi_fit2) 
+confint.default(logi_fit2) # 95% confidence intervals using standard errors
+exp(coef(logi_fit2)) # get the odds ratios
+
+# Check the mean RIDAGEYR, LBXGH, BMXBMI of trial participants and non-participants.
+trial = T2D[which(T2D$TRIAL==1),]
+NonPart = T2D[which(T2D$TRIAL==0),]
+ave_age = cbind(mean(trial$RIDAGEYR),mean(NonPart$RIDAGEYR))
+ave_LBXGH = cbind(mean(trial$LBXGH),mean(NonPart$LBXGH))
+ave_BMI = cbind(mean(trial$BMXBMI),mean(NonPart$BMXBMI))
+data = matrix(cbind(ave_age, ave_LBXGH,ave_BMI), ncol = 2, byrow = TRUE)
+colnames(data) <- c("Trial Participants","Non-Participants")
+rownames(data) <- c("Age","Hemoglobin A1C","BMI")
+data = as.table(data)
+data
+
+# Trial participants have higher age than non-participants. 
+# Trial participants have higher Hemoglobin A1C values than non-participants. 
+# Trial participants have lower BMI than non-participants. 
+```
+
+- Linear Regression (Outcome is numerical)
+
+Linear regression is a linear approach to modeling the relationship between a response and one or more predictor variables. The case of one predictor is called simple linear regression. For more than one predictors, the process is called multiple linear regression.
+
+For example, we want to predict the Hemoglobin A1C value when age and BMI are known between the cilinical trial participants and non-participants.
+
+```{r linear}
+# Building an initial linear regression model
+lin_fit1 = lm(LBXGH ~ RIDAGEYR + BMXBMI + GROUP, data = T2D) 
+# Variable BMI is not significant. We need to remove it and update the model
+summary(lin_fit1) 
+
+# Check the collinearity of predictors to make sure there are no two variales are highly correlated
+# install.packages("olsrr")
+library(olsrr)
+ols_vif_tol(lin_fit1) # There is no collinearity issue
+# A VIF of 1 means that there is no correlation among the kth predictor and the remaining predictor variables. 
+# The general rule of thumb is that VIFs exceeding 4 warrant further investigation, while VIFs exceeding 10 are signs of serious multicollinearity requiring correction.
+
+# Remove BMI in lin_fit1 and refine the model as lin_fit2
+lin_fit2 = update(lin_fit1, ~ RIDAGEYR + GROUP)
+summary(lin_fit2)
+
+# Use anova to compare the models with or without the variable BMI
+anova(lin_fit1,lin_fit2)
+AIC(lin_fit1,lin_fit2)
+# The two models do not have much difference as p-value is greater than 0.05. Thus, we use the simpler model "lin_fit2".
+
+## Implications ##
+
+# GROUPTrial has a positive estimated coefficient = 1.5, with p-value less than 0.05.  It means that the Type 2 diabetes clinical trial are more likely to enroll patients with higher Hemoglobin A1C values. 
+# However, age has a negative estimated coefficient = -0.02, with p-value less than 0.05.  It means that patients who are younger are more likely to have higher Hemoglobin A1C values.
+```
+
+## 6. Survival Analysis for Outcomes or Mortality Comparisions
+
+For survival analysis, the _survival_ and _survminer_ packages in R will be used. The _ovarian_ dataset (Edmunson J.H. et al., 1979) that comes with the survival package will be used for the following analysis. 
+
+The _ovarian_ dataset comprises a cohort of ovarian cancer patients and respective clinical information, including the time patients were tracked until they either died or were lost to follow-up (futime), whether patients were censored or not (fustat), patient age (age), treatment group assignment (rx), presence of residual disease (resid.ds) and ECOG performance status (ecog.ps).
+
+
+- Kaplan-Meier estimator
+
+The Kaplan-Meier estimator, independently described by Edward Kaplan and Paul Meier. It is a non-parametric statistic used to estimate the survival function from lifetime data. In medical research, it is often used to measure the fraction of patients living for a certain amount of time after treatment. 
+
+An important advantage of the Kaplan–Meier curve is that the method can take into account some types of censored data, particularly right-censoring, which occurs if a patient withdraws from a study, is lost to follow-up, or is alive without event occurrence at last follow-up. 
+
+In order to generate a Kaplan–Meier estimator, at least two pieces of data are required for each patient (or each subject): the status at last observation (event occurrence or right-censored) and the time to event (or time to censoring). If the survival functions between two or more groups are to be compared, then a third piece of data is required: the group assignment of each subject. 
+
+```{r Kaplan}
+# install.packages("survival")
+# install.packages("survminer")
+library(survival)
+library(survminer)
+
+# Import the ovarian cancer dataset 
+data(ovarian)
+head(ovarian)
+
+# Dichotomize continuous variable "age" to binary values
+hist(ovarian$age)
+# According to the histogram, devide patients into two groups who are below 50 or not
+ovarian <- ovarian %>% mutate(age_group = ifelse(age >=50, "old", "young"))
+ovarian$age_group <- factor(ovarian$age_group)
+head(ovarian)
+
+# Change data values to labels
+ovarian$rx <- factor(ovarian$rx, levels = c("1", "2"), labels = c("A", "B"))
+ovarian$resid.ds <- factor(ovarian$resid.ds, levels = c("1", "2"), labels = c("no", "yes"))
+ovarian$ecog.ps <- factor(ovarian$ecog.ps, levels = c("1", "2"), labels = c("good", "bad"))
+head(ovarian)
+
+# Fit survival data using the Kaplan-Meier method
+surv_object <- Surv(time = ovarian$futime, event = ovarian$fustat)
+surv_object 
+
+# Examine prdictive value of the treatment groups
+fit1 <- survfit(surv_object ~ rx, data = ovarian)
+summary(fit1)
+
+# Plot the curves
+ggsurvplot(fit1, data = ovarian)
+
+# Examine prdictive value of residual disease status
+fit2 <- survfit(surv_object ~ resid.ds, data = ovarian)
+ggsurvplot(fit2, data = ovarian)
+
+# Examine prdictive value of the age groups
+fit3 <- survfit(surv_object ~ age_group, data = ovarian)
+ggsurvplot(fit3, data = ovarian)
+```
+
+- Log-rank test
+
+The log-rank test can be used to compare survival curves of two groups. It is a statistical hypothesis test that tests the null hypothesis that survival curves of two populations do not differ. 
+
+```{r logrank}
+# The log-ran test is simple when using the ggsurvplot() function
+# The pval = TRUE argument conducts and plots the p-value of a log rank test in the Kaplan-Meier plot as well
+
+# Compare the survial probabilities between the two treatment groups
+ggsurvplot(fit1, data = ovarian, pval = TRUE)
+# The log-rank p-value of 0.3 indicates a non-significant difference between two treatment groups if p < 0.05 is set to be the threshold
+
+# Compare the survial probabilities between the residual disease status
+ggsurvplot(fit2, data = ovarian, pval = TRUE)
+# The log-rank test of residual disease status is almost significant
+# A follow-up study with an increased sample size might be considerable 
+
+# Compare the survial probabilities between the age groups
+ggsurvplot(fit3, data = ovarian, pval = TRUE)
+# There is no significant difference between age groups either
+```
+
+- Cox's Proportional Hazards Models
+
+The Cox's proportional hazards model describes the probability of an event or its hazard _H_ (which is survival in this case) if the subject survived up to that particular time point _T_. 
+
+Also, the hazard function considers covariates when comparing survival of patient groups. Covariates, also called explanatory or independent variables in regression analysis, are variables that are possibly predictive of an outcome or that you might want to adjust for to account for interactions between variables.
+
+```{r cox}
+# Let consider multiple covariates that might affect the survival probability together
+# Fit a Cox's proportional hazards model
+fit.coxph <- coxph(surv_object ~ rx + resid.ds + age_group + ecog.ps, data = ovarian)
+
+# Get a forest plot showing hazard ratios of covariates
+ggforest(fit.coxph, data = ovarian)
+```
+
+Every Hazard ratio represents a relative risk of death between two groups. For example, a hazard ratio of 0.25 for treatment groups tells that patients who received treatment B have a reduced risk of dying compared to patients who received treatment A (which served as a reference to calculate the hazard ratio). As shown by the forest plot, the respective 95% confidence interval is 0.071 - 0.89 and this result is significant as p-value is 0.032 < 0.05.
+
+Using the Cox's proportional hazards model, we can see that the treatment group, residual disease status, and the age group variables significantly influence the patients' risk of death in this study. The model result is different than the Kaplan-Meier estimator and the log-rank test.
+

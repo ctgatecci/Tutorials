@@ -1,0 +1,152 @@
+---
+output:
+  html_document: default
+---
+
+## Propensity score weighting/matching 
+Propensity score(PS) is a common concept in the generalizability assessment of clinical studies. In this section, we will review the concept of the propensity score and describe how methods based on it can be used to reduce the effects of confounding when using observational data to estimate treatment effects, and measure the similarity (or dissimilarity) of the trial participants and the population.
+
+### Concept of propensity score 
+
+
+#### Definition:
+The propensity score is typically defined as the probability of receiving some program (or “treatment”) versus a comparison condition, given a set of observed baseline covariates. (Rosenbaum and Rubin, 1983).
+
+We use $e_i$ to denote propensity score, the definition can be written as : $e_i = Pr(Z_i|X_i)$, where $X_i = (X_1,X_2,...,X_n)$ is the set of subject $i$'s observed baseline covariates, and $Z_i$ is an indicator variable denoting subject $i$'s treatment received ($Z_i=1$ for active treatment and $Z_i=0$ for control treatment). 
+
+
+#### Motivation:
+Because the proposition of propropensity score is to perfect the Rubin Causal Model (Rubin, 1974) which is described as potential outcome framework, I begin this part by describing the conceptual framework. In this process, I will exhibit the advantages on the propensity score.
+
+Here I refer to Dr. Peng Ding's blog on "Capital of Statistics". In this blog, Dr.Ding gives a detailed explanation on the propensity score.
+
+Let's denote $\{Y_i(1),Y_i(0)\}$ as subject $i$'s potential outcome under the active treatment and control treatment. Then we can use $Y_i(1)-Y_i(0)$ to denote subject $i$'s causal effect (treatment effect). Unfortunately, for individual patient,the treatment received is either active or control. The observed outcome only can be $Y_i = Z_i*Y_i(1)+(1-Z_i)*Y_i(0)$. Individual patient's causal effect can't be observed. However, if $Z_i$ is completely randomized, we can observe the whole sample subjects' average causal effect (ACE):
+
+$$ACE(Z\to Y) = E\{Y_i(1)-Y_i(0)\}$$
+Since
+$$
+\begin{aligned}
+ACE(Z\to Y) &= E\{Y_i(1)\} - E\{Y_i(0)\} \\
+&= E\{Y_i(1)|Z_i=1\} - E\{Y_i(0)|Z_i=0\}\\
+&= E\{Y_i|Z_i=1\} - E\{Y_i|Z_i=0\}
+\end{aligned}
+$$
+based on the assumption:
+$$Z\perp\{Y_i(1),Y_i(0)\}$$
+Nonetheless, in some studies, we prior know some covariates have strong relationships with the result. We control these covariates to reduce the variance in experiments. Then we find $Z\perp\{Y_i(1),Y_i(0)\}$ can't be satisfied. More generally, 
+$$Z\perp\{Y_i(1),Y_i(0)|X\}$$
+Then, 
+$$
+\begin{aligned}
+ACE(Z\to Y) &= E\{Y(1)\} - E\{Y(0)\} \\
+&= E\{Y(1)|X\} - E\{Y(0)|X\} \\
+&= E\{Y(1)|X,Z=1\} - E\{Y(0)|X,Z=0\}\\
+&= E\{Y|X,Z=1\} - E\{Y|X,Z=0\}
+\end{aligned}
+$$
+From above formular, to get the average causal effect (ACE), we need to estimate $E\{Y|X,Z=z\}(z=0,1)$. It becames a regression problem. One assumption is to use simple linear model: $E\{Y|X,Z\}=\beta_0+\beta_xX+\beta_zZ$ to fit the data, and here $\beta_z$ is the average causal effect (ACE). Although the linear model is easy to be realized, it has obvious defects.
+
+The core idea of Rubin Causal model is "matching". More specifically, we want to find "similar" subjects in different groups by "matching". By comparing the responses of these "similar" subjects, we estimate the average causal effect (ACE). However, as dimensions of covariates increasing, using linear model to realize "matching" becomes hard. To perfect Rubin Causal model, in 1983, Paul Rosenbaum and Donald Rubin defined the propensity score 
+$$e(X) = Pr(Z=1|X)$$
+The propensity score is a balancing score: conditional on the propensity score, the distribution of measured baseline covariates is similar between treated and untreated subjects. Thus, in a set of subjects all of whom have the same propensity score, the distribution of observed baseline covariates will be the same between the treated and untreated subjects.
+
+It satisfies $Z\perp X|e(X)$ (also called sufficient dimension reduction), and $Z\perp \{Y_i(1),Y_i(0)\}|e(X)$. Hence, we can rewrite the formular as: 
+$$
+\begin{aligned}
+ACE &= E\{Y|e(X),Z=1\} - E\{Y|e(X),Z=0\}\\
+&= E\{Y(1)\}-E\{Y(0)\}\\
+&= E\{\frac{ZY}{e(X)}\}-E\{\frac{(1-Z)Y}{1-e(X)}\}
+\end{aligned}
+$$.
+
+
+#### How to use R to estimate propensity score:
+
+*Here we ues logistics regression to estimate the propensity score *
+
+##### Introduction to Data Sets:
+The example data set is a subset of the job training program analyzed in Lalonde (1986) and Dehejia and Wahba (1999). The variables in this data set include:
+
+1. participation in the job training program (treat, which is equal to 1 if participated in the program, and 0 otherwise) 
+2. age (age)
+3. years of education (educ)
+4. race (black which is equal to 1 if black, and 0 otherwise, hispan which is equal to 1 if hispanic, and 0 otherwise)
+5. marital status (married, which is equal to 1 if married, 0 otherwise)
+6. high school degree (nodegree, which is equal to 1 if no degree, 0 otherwise)
+7. 1974 real earnings (re74)
+8. 1975 real earnings (re75)
+9. the main outcome variable, 1978 real earnings (re78)
+
+```{r }
+data("lalonde", package = "cobalt")   # use dataset "lalonde" in package"cobalt"
+head(lalonde)     # first 6 rows of dataset "lalonde"
+```
+
+##### Estimate the propensity score:
+```{r }
+m_ps <- glm(treat ~ age + treat + educ + race + nodegree + married +  re74 + re75, family = binomial(), data = lalonde) # use logistics regression model for propensity score estimation
+summary(m_ps)
+```
+```{r}
+prs_df <- data.frame(pr_score = predict(m_ps, type = "response"),
+                     treat = m_ps$model$treat)
+head(prs_df)
+```
+
+
+### Propensity Score Matching and Propensity Score Weighting
+
+Propensity score matching (PSM) method and propensity score weighting (IPTW) method are widely used for studying causal treatment effect in observational studies. 
+
+#### Propensity score matching (PSM) method
+
+Propensity score matching (PSM) method is one-to-one or pair matching, in which pairs of treated and untreated subjects are formed, such that matched subjects have similar values of the propensity score. 
+
+*Here we use "MatchIt" package for PSM analysis*
+
+```{r}
+library(MatchIt)
+match_model <- matchit(treat ~ age + educ + race + nodegree + married + re74 + re75, data = lalonde, method = "nearest")
+# summary(match_model)
+match_data <- match.data(match_model)
+library(dplyr) 
+match_data <- match_data %>% rename(pr_score = distance)
+head(match_data %>%
+       select(pr_score,treat))
+```
+
+*Now we estimate the average causal effect (ACE) after we doing PSM analysis* 
+
+```{r}
+match_data %>%
+  group_by(treat) %>%
+  summarise(Income1978 = mean(re78),
+            n = n())
+```
+
+#### Propensity score weighting (IPTW) method
+Since the PSM method is one-to-one or pair matching, the control group would be shrunk down to the same size as the treatment group. A possibly better use of the propensity scores is to keep all observations in play but weight them according to the propensity score.
+
+Weights can be defined as $w_i = \frac{Z_i}{e(X_i)}-\frac{(1-Z_i)}{1-e(X_i)}$. A subject’s weight is equal to the inverse of the probability of receiving the treatment that the subject actually received. Inverse probability of treatment weighting was first proposed by Rosenbaum (1987a) as a form of model-based direct standardization.
+$$
+\begin{aligned}
+ACE &= E\{\frac{ZY}{e(X)}\}-E\{\frac{(1-Z)Y}{1-e(X)}\}\\
+&= E\{w_iY_i(1)\}-E\{w_iY_i(0)\}
+\end{aligned}
+$$.
+
+*Here we use "WeightIt" package for IPTW analysis*
+```{r}
+library("WeightIt")
+library("cobalt")
+W.out <- weightit(treat ~ age + educ + race + married + nodegree + re74 + re75,
+        data = lalonde, estimand = "ATT", method = "ps")
+
+lalonde %>%
+  mutate(weights = get.w(W.out)) %>%
+  group_by(treat) %>%
+  summarise(Income1978_weighted = weighted.mean(re78, weights),
+            n = n())
+
+```
+
