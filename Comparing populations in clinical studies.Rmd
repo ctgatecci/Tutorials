@@ -2,7 +2,7 @@
 title: "Comparing populations in clinical studies"
 
 output:
-  html_document: default
+  rmarkdown::github_document
   pdf_document: default
 ---
 
